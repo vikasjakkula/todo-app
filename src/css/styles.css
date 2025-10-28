@@ -6,7 +6,7 @@ html {
 }
 
 body {
-	background: #9D00FF;
+	background: #7C3AED;
 	background-attachment: fixed;
 	margin: 0px;
 	height: 100%!important;
@@ -61,7 +61,7 @@ li {
 
 input {
 	background-color: #fff;
-	border: solid 1.5px #4D1366;
+	border: solid 1.5px #7C3AED;
 	height: 50px;
 	border-top-right-radius: 0px;
 	border-bottom-right-radius: 0px;
@@ -69,7 +69,7 @@ input {
 	border-bottom-left-radius: 5px;
 	width: 400px;
 	padding: 0px;
-	color: #9D00FF;
+	color: #7C3AED;
 	box-sizing: border-box;
 	-moz-box-sizing: border-box;
 	text-indent: 30px;
@@ -79,7 +79,7 @@ input {
 }
 
 ::placeholder {
-	color: #745680;
+	color: #A78BFA;
 	font-family: 'Raleway', sans-serif;
 }
 
@@ -102,8 +102,8 @@ button {
 	border-bottom-right-radius: 5px;
 	border-top-left-radius: 0px;
 	border-bottom-left-radius: 0px;
-	border: solid 1.5px #4D1366;
-	background-color: #4D1366;
+	border: solid 1.5px #7C3AED;
+	background-color: #7C3AED;
 	padding: 0px;
 	margin: 0px;
 	color: #FFF;
