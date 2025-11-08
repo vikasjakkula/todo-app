@@ -1,39 +1,85 @@
-import React from 'react';
-import { Check } from 'react-feather';
-import { X } from 'react-feather';
-
-
-export const TASK_STATUSES = {
-	TO_DO: 'TO_DO',
-	DONE: 'DONE'
-};
+import React, { useState } from 'react';
+import { Edit2, Trash2, Check, X } from 'react-feather';
 
 export default (props) => {
-	const handleChange = (name, type) => {
-		props.remove(name, type);
+	const [editingId, setEditingId] = useState(null);
+	const [editText, setEditText] = useState('');
+
+	const handleEdit = (todo) => {
+		setEditingId(todo.id);
+		setEditText(todo.text);
 	};
-	const handleDone = (name) => {
-		props.complete(name);
+
+	const handleSaveEdit = (todo) => {
+		if (editText.trim()) {
+			props.updateTodo(todo.id, editText.trim());
+			setEditingId(null);
+			setEditText('');
+		}
 	};
-	const rlist = props.tasks.map((list, idx) =>
-		<div key={idx}>
-			<li className="todo">{list}</li>
-			<Check className="check" color="white" size={17} onClick={() => handleDone(list)} />
-			<X className="cross" color="white" size={17} onClick={() => handleChange(list, TASK_STATUSES.TO_DO)} />
+
+	const handleCancelEdit = () => {
+		setEditingId(null);
+		setEditText('');
+	};
+
+	const todoList = props.tasks.map((todo) => (
+		<div key={todo.id} className="todo-item">
+			{editingId === todo.id ? (
+				<React.Fragment>
+					<input
+						type="text"
+						value={editText}
+						onChange={(e) => setEditText(e.target.value)}
+						className="edit-input"
+						onKeyPress={(e) => {
+							if (e.key === 'Enter') handleSaveEdit(todo);
+							if (e.key === 'Escape') handleCancelEdit();
+						}}
+						autoFocus
+					/>
+					<div className="todo-actions">
+						<Check 
+							className="action-icon save-icon" 
+							size={18} 
+							onClick={() => handleSaveEdit(todo)}
+							title="Save"
+						/>
+						<X 
+							className="action-icon cancel-icon" 
+							size={18} 
+							onClick={handleCancelEdit}
+							title="Cancel"
+						/>
+					</div>
+				</React.Fragment>
+			) : (
+				<React.Fragment>
+					<div className="todo-text">
+						{todo.text}
+					</div>
+					<div className="todo-actions">
+						<Edit2 
+							className="action-icon edit-icon" 
+							size={18} 
+							onClick={() => handleEdit(todo)}
+							title="Edit"
+						/>
+						<Trash2 
+							className="action-icon delete-icon" 
+							size={18} 
+							onClick={() => props.deleteTodo(todo.id)}
+							title="Delete"
+						/>
+					</div>
+				</React.Fragment>
+			)}
 		</div>
-	);
-	const dlist = props.done.map((done, idx) =>
-		<div key={idx}>
-			<li className="done">{done}</li>
-			<X className="cross" color="white" size={17} onClick={() => handleChange(done, TASK_STATUSES.DONE)} />
-		</div>
-	);
+	));
 
 	return (
-		<div>
-			<ul>{rlist}</ul>
-			{props.done.length && <h1>Completed tasks</h1>}
-			<ul>{dlist}</ul>
+		<div className="todos-container">
+			{todoList}
 		</div>
 	);
-}
+};

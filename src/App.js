@@ -1,7 +1,7 @@
 import React, { Component } from 'react';
-import ToDo, { TASK_STATUSES } from './components/ToDo';
+import ToDo from './components/ToDo';
 import Auth from './components/Auth';
-import { auth, db } from './firebase';
+import { supabase } from './supabase';
 import './css/styles.css';
 
 export default class Home extends Component {
@@ -9,184 +9,159 @@ export default class Home extends Component {
 		super(props);
 		this.state = {
 			task: '',
-			list: [],
-			done: [],
+			tasks: [],
 			user: null,
-			loading: true
+			loading: true,
+			isOptimizing: false
 		};
-		this.handleClick = this.handleClick.bind(this);
-		this.removeTodo = this.removeTodo.bind(this);
-		this.completeTodo = this.completeTodo.bind(this);
 	}
 
 	componentDidMount() {
-		// Listen for authentication state changes
-		this.unsubscribe = auth.onAuthStateChanged((user) => {
-			if (user) {
-				this.setState({ user, loading: false }, () => {
-					this.loadTasksFromFirestore();
-				});
-			} else {
-				this.setState({ user: null, loading: false, list: [], done: [] });
-			}
-		});
+		this.checkUser();
 	}
 
 	componentWillUnmount() {
-		if (this.unsubscribe) {
-			this.unsubscribe();
+		if (this.tasksSubscription) {
+			this.tasksSubscription.unsubscribe();
 		}
 	}
 
-	loadTasksFromFirestore = async () => {
+	checkUser = async () => {
+		const { data } = await supabase.auth.getSession();
+		if (data && data.session && data.session.user) {
+			this.setState({ user: data.session.user, loading: false }, () => {
+				this.loadTasks();
+			});
+		} else {
+			this.setState({ loading: false });
+		}
+	};
+
+	loadTasks = async () => {
 		if (!this.state.user) return;
 
 		try {
-			const querySnapshot = await db.collection('tasks')
-				.where('userId', '==', this.state.user.uid)
-				.get();
+			const { data, error } = await supabase
+				.from('todos')
+				.select('*')
+				.eq('user_id', this.state.user.id)
+				.order('created_at', { ascending: false });
 
-			const todoList = [];
-			const doneList = [];
+			if (error) throw error;
+			this.setState({ tasks: data || [] });
 
-			querySnapshot.forEach((doc) => {
-				const task = { id: doc.id, ...doc.data() };
-				if (task.status === TASK_STATUSES.DONE) {
-					doneList.push(task);
-				} else {
-					todoList.push(task);
-				}
-			});
-
-			this.setState({
-				list: todoList.map(t => t.text),
-				done: doneList.map(t => t.text)
-			});
+			// Subscribe to real-time changes
+			this.tasksSubscription = supabase
+				.channel('todos')
+				.on(
+					'postgres_changes',
+					{ 
+						event: '*', 
+						schema: 'public', 
+						table: 'todos',
+						filter: 'user_id=eq.' + this.state.user.id
+					},
+					() => {
+						this.loadTasks();
+					}
+				)
+				.subscribe();
 		} catch (error) {
 			console.error('Error loading tasks:', error);
 		}
-	}
+	};
 
 	onChange = (event) => {
 		this.setState({ task: event.target.value });
 	};
 
-	async removeTodo(name, type) {
-		let array, index;
-		switch (type) {
-			case TASK_STATUSES.TO_DO:
-				array = [...this.state.list];
-				index = array.indexOf(name);
-				if (index > -1) {
-					array.splice(index, 1);
-					this.setState({ list: array });
-					await this.deleteTaskFromFirestore(name, TASK_STATUSES.TO_DO);
-				}
-				break;
-			case TASK_STATUSES.DONE:
-				array = [...this.state.done];
-				index = array.indexOf(name);
-				if (index > -1) {
-					array.splice(index, 1);
-					this.setState({ done: array });
-					await this.deleteTaskFromFirestore(name, TASK_STATUSES.DONE);
-				}
-				break;
-			default:
-				// nothing
-				break;
-		}
-	}
+	optimizeInput = async () => {
+		if (!this.state.task.trim()) return;
 
-	async completeTodo(name) {
-		// Remove from todo, add to done
-		const list = [...this.state.list];
-		const done = [...this.state.done];
-		const index = list.indexOf(name);
-		if (index > -1) {
-			list.splice(index, 1);
-			done.push(name);
-			this.setState({ list, done });
-			await this.updateTaskStatusInFirestore(name);
+		this.setState({ isOptimizing: true });
+		
+		try {
+			const originalText = this.state.task;
+			// Simple optimization: trim, capitalize first letter, remove extra spaces
+			const optimized = originalText
+				.trim()
+				.replace(/\s+/g, ' ')
+				.replace(/^./, str => str.toUpperCase())
+				.replace(/\bi\b/g, 'I'); // Capitalize standalone 'i'
+			
+			this.setState({ task: optimized });
+		} catch (error) {
+			console.error('Error optimizing input:', error);
+		} finally {
+			setTimeout(() => {
+				this.setState({ isOptimizing: false });
+			}, 300);
 		}
-	}
+	};
 
-	async handleClick() {
-		if (this.state.task !== '') {
-			const taskText = this.state.task;
-			this.setState(
-				(prevState) => ({
-					task: '',
-					list: [...prevState.list, prevState.task]
-				})
-			);
-			await this.addTaskToFirestore(taskText);
-		}
-	}
-
-	addTaskToFirestore = async (taskText) => {
-		if (!this.state.user) return;
+	addTodo = async () => {
+		if (!this.state.task.trim() || !this.state.user) return;
 
 		try {
-			await db.collection('tasks').add({
-				text: taskText,
-				status: TASK_STATUSES.TO_DO,
-				userId: this.state.user.uid,
-				createdAt: new Date().toISOString()
-			});
+			const { error } = await supabase
+				.from('todos')
+				.insert([{
+					user_id: this.state.user.id,
+					user_email: this.state.user.email,
+					text: this.state.task.trim(),
+					completed: false
+				}]);
+
+			if (error) throw error;
+			this.setState({ task: '' });
 		} catch (error) {
 			console.error('Error adding task:', error);
+			alert('Failed to add task. Please try again.');
 		}
 	};
 
-	updateTaskStatusInFirestore = async (taskText) => {
-		if (!this.state.user) return;
-
+	updateTodo = async (id, newText) => {
 		try {
-			const querySnapshot = await db.collection('tasks')
-				.where('userId', '==', this.state.user.uid)
-				.where('text', '==', taskText)
-				.where('status', '==', TASK_STATUSES.TO_DO)
-				.get();
+			const { error } = await supabase
+				.from('todos')
+				.update({ text: newText, updated_at: new Date().toISOString() })
+				.eq('id', id)
+				.eq('user_id', this.state.user.id);
 
-			querySnapshot.forEach(async (document) => {
-				await db.collection('tasks').doc(document.id).update({
-					status: TASK_STATUSES.DONE
-				});
-			});
+			if (error) throw error;
 		} catch (error) {
 			console.error('Error updating task:', error);
+			alert('Failed to update task. Please try again.');
 		}
 	};
 
-	deleteTaskFromFirestore = async (taskText, status) => {
-		if (!this.state.user) return;
-
+	deleteTodo = async (id) => {
 		try {
-			const querySnapshot = await db.collection('tasks')
-				.where('userId', '==', this.state.user.uid)
-				.where('text', '==', taskText)
-				.where('status', '==', status)
-				.get();
+			const { error } = await supabase
+				.from('todos')
+				.delete()
+				.eq('id', id)
+				.eq('user_id', this.state.user.id);
 
-			querySnapshot.forEach(async (document) => {
-				await db.collection('tasks').doc(document.id).delete();
-			});
+			if (error) throw error;
 		} catch (error) {
 			console.error('Error deleting task:', error);
+			alert('Failed to delete task. Please try again.');
 		}
-	}
+	};
 
 	handleKey = (event) => {
 		if (event.key === 'Enter') {
-			this.handleClick();
+			this.addTodo();
 		}
 	};
 
 	handleAuthChange = (user) => {
 		this.setState({ user });
 		if (user) {
-			this.loadTasksFromFirestore();
+			this.loadTasks();
+		} else {
+			this.setState({ tasks: [] });
 		}
 	};
 
@@ -207,20 +182,41 @@ export default class Home extends Component {
 			<div className="header">
 				<Auth user={this.state.user} onAuthChange={this.handleAuthChange} />
 				<h1 className="title" style={{ color: '#fff', fontSize: '2.5em' }}>My tasks</h1>
-				<input
-					placeholder="Ex: Buy groceries"
-					maxLength={80}
-					value={this.state.task}
-					type="text"
-					onKeyPress={this.handleKey}
-					onChange={this.onChange}
-				/>
-				<button onClick={this.handleClick} style={{ color: '#fff' }}>+</button>
+				<div className="input-container">
+					<input
+						placeholder="Ex: Buy groceries"
+						maxLength={200}
+						value={this.state.task}
+						type="text"
+						onKeyPress={this.handleKey}
+						onChange={this.onChange}
+						className="task-input"
+					/>
+					<button 
+						onClick={this.optimizeInput} 
+						className="optimize-btn"
+						disabled={this.state.isOptimizing || !this.state.task.trim()}
+						title="Optimize input"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-sparkles-icon lucide-sparkles">
+							<path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/>
+							<path d="M20 2v4"/>
+							<path d="M22 4h-4"/>
+							<circle cx="4" cy="20" r="2"/>
+						</svg>
+					</button>
+					<button 
+						onClick={this.addTodo} 
+						className="add-btn"
+						style={{ color: '#fff' }}
+					>
+						+
+					</button>
+				</div>
 				<ToDo
-					tasks={this.state.list}
-					done={this.state.done}
-					remove={this.removeTodo}
-					complete={this.completeTodo}
+					tasks={this.state.tasks}
+					updateTodo={this.updateTodo}
+					deleteTodo={this.deleteTodo}
 				/>
 			</div>
 		);

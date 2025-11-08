@@ -1,11 +1,33 @@
-import React from 'react';
-import { auth, googleProvider } from '../firebase';
+import React, { useEffect } from 'react';
+import { supabase } from '../supabase';
 
 const Auth = ({ user, onAuthChange }) => {
+	useEffect(() => {
+		const subscription = supabase.auth.onAuthStateChange(
+			async (event, session) => {
+				if (session && session.user) {
+					onAuthChange(session.user);
+				} else {
+					onAuthChange(null);
+				}
+			}
+		);
+
+		return () => {
+			if (subscription && subscription.data) {
+				subscription.data.unsubscribe();
+			}
+		};
+	}, [onAuthChange]);
+
 	const signInWithGoogle = async () => {
 		try {
-			const result = await auth.signInWithPopup(googleProvider);
-			onAuthChange(result.user);
+			const { error } = await supabase.auth.signIn({
+				provider: 'google'
+			}, {
+				redirectTo: window.location.origin
+			});
+			if (error) throw error;
 		} catch (error) {
 			console.error('Error signing in with Google:', error);
 			alert('Failed to sign in. Please try again.');
@@ -14,7 +36,8 @@ const Auth = ({ user, onAuthChange }) => {
 
 	const handleSignOut = async () => {
 		try {
-			await auth.signOut();
+			const { error} = await supabase.auth.signOut();
+			if (error) throw error;
 			onAuthChange(null);
 		} catch (error) {
 			console.error('Error signing out:', error);
@@ -22,15 +45,17 @@ const Auth = ({ user, onAuthChange }) => {
 	};
 
 	if (user) {
+		const avatarUrl = user.user_metadata && (user.user_metadata.avatar_url || user.user_metadata.picture);
+		const displayName = user.user_metadata && user.user_metadata.full_name || user.email;
 		return (
 			<div className="auth-container">
 				<div className="user-info">
 					<img 
-						src={user.photoURL} 
-						alt={user.displayName} 
+						src={avatarUrl} 
+						alt={displayName} 
 						className="user-avatar"
 					/>
-					<span className="user-name">{user.displayName}</span>
+					<span className="user-name">{displayName}</span>
 					<button onClick={handleSignOut} className="sign-out-btn">
 						Sign Out
 					</button>
